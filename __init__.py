@@ -60,6 +60,9 @@
 #
 #               Update 31/08/2020
 #               - add rich text formatting
+#
+#               Update 03/08/2020
+#               - make it working again after Quizlet update
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
@@ -316,6 +319,27 @@ class QuizletWindow(QWidget):
                     'wordRichText': c.get('wordRichText', ''),
                     'definitionRichText': c.get('definitionRichText', ''),
                 })
+        elif "studiableData" in result:
+            terms = {}
+            data = result["studiableData"]
+            for d in data["studiableItems"]:
+                terms[d["id"]] = {}
+            smc = {}
+            for d in data["studiableMediaConnections"]:
+                id_ = d["connectionModelId"]
+                if id_ not in smc:
+                    smc[id_] = {}
+                # "plainText", "languageCode", "ttsUrl", "ttsSlowUrl", "richText"
+                for k, v in d.get("text", {}).items():
+                    smc[id_][k] = v
+                if "image" in d:
+                    smc[id_]["_imageUrl"] = d["image"]["url"]
+            for d in data["studiableCardSides"]:
+                id_ = d["studiableItemId"]
+                terms[id_][d["label"]] = smc[d["id"]]["plainText"]
+                terms[id_]["{}RichText".format(d["label"])] = smc[d["id"]]["richText"]
+                terms[id_]["_imageUrl"] = smc[d["id"]].get("_imageUrl", "")
+            terms = terms.values()
         else:
             terms = result['terms']
 
