@@ -163,6 +163,7 @@ class QuizletWindow(QWidget):
 
         self.results = None
         self.thread = None
+        self.closed = False
 
         self.cookies = self.getCookies()
 
@@ -259,6 +260,40 @@ class QuizletWindow(QWidget):
             self.label_results.setText("Oops! That's not a Quizlet URL :(")
             return
 
+        if "/folders/" not in urlPath:
+            self.downloadSet(urlPath)
+        else:
+            r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
+            r.raise_for_status()
+
+            regex = re.escape('window.Quizlet["dashboardData"] = ')
+            regex += r'(.+?)'
+            regex += re.escape('; QLoad("Quizlet.dashboardData");')
+
+            m = re.search(regex, r.text)
+
+            data = m.group(1).strip()
+            results = json.loads(data)
+
+            assert len(results["models"]["folder"]) == 1
+            quzletFolder = results["models"]["folder"][0]
+            for quizletSet in results["models"]["set"]:
+                if self.closed:
+                    return
+                self.downloadSet(quizletSet["_webUrl"], quzletFolder["name"])
+                self.sleep(1.5)
+
+    def closeEvent(self, evt):
+        self.closed = True
+        evt.accept()
+
+    def sleep(self, seconds):
+        start = time.time()
+        while time.time() - start < seconds:
+            time.sleep(0.01)
+            QApplication.instance().processEvents()
+
+    def downloadSet(self, urlPath, parentDeck=""):
         # validate and set Quizlet deck ID
         quizletDeckID = urlPath.strip("/")
         if quizletDeckID == "":
@@ -308,14 +343,14 @@ class QuizletWindow(QWidget):
             deck = self.thread.results
             # self.label_results.setText(("Importing deck {0} by {1}...".format(deck["title"], deck["created_by"])))
             self.label_results.setText(("Importing deck {0}...".format(deck["title"])))
-            self.createDeck(deck)
+            self.createDeck(deck, parentDeck)
             # self.label_results.setText(("Success! Imported <b>{0}</b> ({1} cards by <i>{2}</i>)".format(deck["title"], deck["term_count"], deck["created_by"])))
             self.label_results.setText(("Success! Imported <b>{0}</b> ({1} cards)".format(deck["title"], deck["term_count"])))
 
         # self.thread.terminate()
         self.thread = None
 
-    def createDeck(self, result):
+    def createDeck(self, result, parentDeck=""):
         config = mw.addonManager.getConfig(__name__)
 
         if config["rich_text_formatting"] and not os.path.exists("_quizlet.css"):
@@ -329,6 +364,9 @@ class QuizletWindow(QWidget):
             name = result['studyable']['title']
         else:
             name = result['title']
+
+        if parentDeck:
+            name = "{}::{}".format(parentDeck, name)
 
         if "termIdToTermsMap" in result:
             terms = []
