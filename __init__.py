@@ -207,7 +207,7 @@ class QuizletWindow(QWidget):
         self.box_upper.addLayout(self.box_right)
 
         # results label
-        self.label_results = QLabel("\r\n<i>Example: https://quizlet.com/150875612/usmle-flash-cards/</i>")
+        self.label_results = QLabel("\r\nExample: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
 
         # add all widgets to top layout
         self.box_top.addLayout(self.box_upper)
