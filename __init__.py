@@ -510,7 +510,7 @@ class QuizletDownloader(QThread):
             self.errorMessage = "Invalid json: {0}".format(e)
         except Exception as e:
             self.error = True
-            self.errorMessage = "{}\n-----------------\n{}".format(e, r.text)
+            self.errorMessage = "{}\n-----------------\n{}".format(e, r.text if r else "")
         # yep, we got it
 
 # plugin was called from Anki
