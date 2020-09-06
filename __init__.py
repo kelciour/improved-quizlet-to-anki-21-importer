@@ -336,8 +336,8 @@ class QuizletWindow(QWidget):
                     smc[id_]["_imageUrl"] = d["image"]["url"]
             for d in data["studiableCardSides"]:
                 id_ = d["studiableItemId"]
-                terms[id_][d["label"]] = smc[d["id"]]["plainText"]
-                terms[id_]["{}RichText".format(d["label"])] = smc[d["id"]]["richText"]
+                terms[id_][d["label"]] = smc[d["id"]].get("plainText", "")
+                terms[id_]["{}RichText".format(d["label"])] = smc[d["id"]].get("richText", "")
                 terms[id_]["_imageUrl"] = smc[d["id"]].get("_imageUrl", "")
             terms = terms.values()
         else:
