@@ -164,6 +164,8 @@ class QuizletWindow(QWidget):
         self.results = None
         self.thread = None
 
+        self.cookies = self.getCookies()
+
         self.initGUI()
 
     # create GUI skeleton
@@ -222,6 +224,19 @@ class QuizletWindow(QWidget):
         self.setWindowTitle("Improved Quizlet to Anki Importer")
         self.resize(self.minimumSizeHint())
         self.show()
+
+    def getCookies(self):
+        config = mw.addonManager.getConfig(__name__)
+
+        cookies = {}
+        if config["qlts"]:
+            cookies = { "qlts": config["qlts"] }
+        elif config["cookies"]:
+            from http.cookies import SimpleCookie
+            C = SimpleCookie()
+            C.load(config["cookies"])
+            cookies = { key: morsel.value for key, morsel in C.items() }
+        return cookies
 
     def onCode(self):
 
@@ -451,16 +466,7 @@ class QuizletDownloader(QThread):
                 with open("_quizlet.css", "w") as f:
                     f.write(rich_text_css.lstrip())
             
-            cookies = {}
-            if config["qlts"]:
-                cookies = { "qlts": config["qlts"] }
-            elif config["cookies"]:
-                from http.cookies import SimpleCookie
-                C = SimpleCookie()
-                C.load(config["cookies"])
-                cookies = { key: morsel.value for key, morsel in C.items() }
-
-            r = requests.get(self.url, verify=False, headers=headers, cookies=cookies)
+            r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
             r.raise_for_status()
 
             regex = re.escape('window.Quizlet["setPasswordData"]')
