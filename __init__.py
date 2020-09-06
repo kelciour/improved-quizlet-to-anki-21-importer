@@ -207,10 +207,11 @@ class QuizletWindow(QWidget):
         self.box_upper.addLayout(self.box_right)
 
         # results label
-        self.label_results = QLabel("\r\nExample: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
+        self.label_results = QLabel("Example: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
 
         # add all widgets to top layout
         self.box_top.addLayout(self.box_upper)
+        self.box_top.addSpacing(10)
         self.box_top.addWidget(self.label_results)
         self.box_top.addStretch(1)
         self.setLayout(self.box_top)
