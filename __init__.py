@@ -318,6 +318,10 @@ class QuizletWindow(QWidget):
     def createDeck(self, result):
         config = mw.addonManager.getConfig(__name__)
 
+        if config["rich_text_formatting"] and not os.path.exists("_quizlet.css"):
+            with open("_quizlet.css", "w") as f:
+                f.write(rich_text_css.lstrip())
+
         # create new deck and custom model
         if "set" in result:
             name = result['set']['title']
@@ -460,12 +464,6 @@ class QuizletDownloader(QThread):
     def run(self):
         r = None
         try:
-            config = mw.addonManager.getConfig(__name__)
-
-            if config["rich_text_formatting"] and not os.path.exists("_quizlet.css"):
-                with open("_quizlet.css", "w") as f:
-                    f.write(rich_text_css.lstrip())
-            
             r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
             r.raise_for_status()
 
