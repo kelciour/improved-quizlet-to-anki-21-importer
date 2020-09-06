@@ -333,7 +333,7 @@ class QuizletWindow(QWidget):
         if "termIdToTermsMap" in result:
             terms = []
             for c in sorted(result['termIdToTermsMap'].values(), key=lambda v: v["rank"]):
-                terms.append({ 
+                terms.append({
                     'word': c['word'],
                     'definition': c['definition'],
                     '_imageUrl': c["_imageUrl"] or '',
