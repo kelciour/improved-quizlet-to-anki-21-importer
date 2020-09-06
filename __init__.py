@@ -240,6 +240,7 @@ class QuizletWindow(QWidget):
         return cookies
 
     def onCode(self):
+        self.button_code.setEnabled(False)
 
         # grab url input
         url = self.text_url.text()
@@ -282,6 +283,8 @@ class QuizletWindow(QWidget):
                     return
                 self.downloadSet(quizletSet["_webUrl"], quzletFolder["name"])
                 self.sleep(1.5)
+
+        self.button_code.setEnabled(True)
 
     def closeEvent(self, evt):
         self.closed = True
