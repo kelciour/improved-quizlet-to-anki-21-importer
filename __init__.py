@@ -61,8 +61,11 @@
 #               Update 31/08/2020
 #               - add rich text formatting
 #
-#               Update 03/08/2020
+#               Update 03/09/2020
 #               - make it working again after Quizlet update
+
+#               Update 04/09/2020
+#               - move the add-on to GitHub
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
