@@ -275,8 +275,6 @@ class QuizletWindow(QWidget):
         return cookies
 
     def onCode(self):
-        self.button_code.setEnabled(False)
-
         # grab url input
         url = self.text_url.text()
 
@@ -295,6 +293,8 @@ class QuizletWindow(QWidget):
         elif not "quizlet.com" in urlDomain:
             self.label_results.setText("Oops! That's not a Quizlet URL :(")
             return
+
+        self.button_code.setEnabled(False)
 
         if "/folders/" not in urlPath:
             self.downloadSet(urlPath)
