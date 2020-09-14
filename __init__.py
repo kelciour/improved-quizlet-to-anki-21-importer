@@ -227,6 +227,7 @@ class QuizletWindow(QWidget):
         # import by copying the page source code from the web browser
         # as a way to bypass 403 Forbidden
         QShortcut(QKeySequence("Ctrl+U"), self, activated=self.getPage)
+        self.text_url.installEventFilter(self) # Fix Ctrl+U on Ubuntu
 
         # go, baby go!
         self.setMinimumWidth(500)
@@ -234,6 +235,12 @@ class QuizletWindow(QWidget):
         self.setWindowTitle("Improved Quizlet to Anki Importer")
         self.resize(self.minimumSizeHint())
         self.show()
+
+    def eventFilter(self, obj: QObject, evt: QEvent):
+        if obj is self.text_url and evt.type() == QEvent.ShortcutOverride:
+            if evt.modifiers() & Qt.ControlModifier and evt.key() == Qt.Key_U:
+                return True
+        return False
 
     def getPage(self):
         d = QDialog(self)
