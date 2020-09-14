@@ -296,8 +296,8 @@ class QuizletWindow(QWidget):
 
         self.button_code.setEnabled(False)
 
-        if "/folders/" not in urlPath:
-            self.downloadSet(urlPath)
+        if "/folders/" not in url:
+            self.downloadSet(url)
         else:
             r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
             r.raise_for_status()
@@ -349,7 +349,8 @@ class QuizletWindow(QWidget):
         # build URL
         # deck_url = ("https://api.quizlet.com/2.0/sets/{0}".format(quizletDeckID))
         # deck_url += ("?client_id={0}".format(QuizletWindow.__APIKEY))
-        deck_url = "https://quizlet.com/{}/flashcards".format(quizletDeckID)
+        # deck_url = "https://quizlet.com/{}/flashcards".format(quizletDeckID)
+        deck_url = urlPath
 
         # stop previous thread first
         # if self.thread is not None:
