@@ -76,11 +76,13 @@ import sys, math, time, urllib.parse, json, re, os
 # Anki
 from aqt import mw
 from aqt.qt import *
-from aqt.utils import showText
+from aqt.utils import showText, tooltip
 from anki.utils import checksum
 
 import requests
 import shutil
+
+from requests.cookies import RequestsCookieJar
 
 requests.packages.urllib3.disable_warnings()
 
@@ -169,6 +171,7 @@ class QuizletWindow(QWidget):
         self.closed = False
 
         self.page = ""
+        self.cloudflare = None
 
         self.cookies = self.getCookies()
 
@@ -229,6 +232,8 @@ class QuizletWindow(QWidget):
         QShortcut(QKeySequence("Ctrl+U"), self, activated=self.getPage)
         self.text_url.installEventFilter(self) # Fix Ctrl+U on Ubuntu
 
+        QShortcut(QKeySequence("Ctrl+G"), self, activated=self.resolveCaptcha)
+
         # go, baby go!
         self.setMinimumWidth(500)
         self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
@@ -241,6 +246,45 @@ class QuizletWindow(QWidget):
             if evt.modifiers() & Qt.ControlModifier and evt.key() == Qt.Key_U:
                 return True
         return False
+
+    def resolveCaptcha(self):
+        url = self.text_url.text().strip()
+        if not url:
+            tooltip("Oops! You forgot the Quizlet URL :(")
+            return
+        d = QDialog(self)
+        d.setWindowTitle("Captcha Challenge")
+        d.setMinimumWidth(500)
+        d.setWindowModality(Qt.WindowModal)
+        l = QVBoxLayout()
+        wv = QWebEngineView()
+        p = QWebEngineProfile("cloudflare", wv)
+        p.setHttpUserAgent(headers["User-Agent"])
+        wp = QWebEnginePage(p, wv)
+        wv.setPage(wp)
+        cs = p.cookieStore()
+        self.captcha = None
+        def onCookieAdded(cookie):
+            if self.captcha is None:
+                self.captcha = QNetworkCookieJar()
+            self.captcha.insertCookie(cookie)
+        cs.cookieAdded.connect(onCookieAdded)
+        wv.load(QUrl(url))
+        bb = QDialogButtonBox(QDialogButtonBox.Cancel|QDialogButtonBox.Ok)
+        def setCookies():
+            self.cloudflare = RequestsCookieJar()
+            for c in self.captcha.allCookies():
+                rq = requests.cookies.create_cookie(name=str(c.name(), 'utf-8'), value=str(c.value(), 'utf-8'))
+                rq.domain = c.domain()
+                self.cloudflare.set_cookie(rq)
+            d.accept()
+            self.onCode()
+        bb.accepted.connect(setCookies)
+        bb.rejected.connect(d.reject)
+        l.addWidget(wv)
+        l.addWidget(bb)
+        d.setLayout(l)
+        d.exec_()
 
     def getPage(self):
         d = QDialog(self)
@@ -295,6 +339,9 @@ class QuizletWindow(QWidget):
             return
 
         self.button_code.setEnabled(False)
+
+        if self.cloudflare:
+            self.cookies = self.cloudflare
 
         if "/folders/" not in url:
             self.downloadSet(url)
