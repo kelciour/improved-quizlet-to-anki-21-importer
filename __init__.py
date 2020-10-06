@@ -168,8 +168,6 @@ class QuizletWindow(QWidget):
         self.thread = None
         self.closed = False
 
-        self.page = ""
-
         self.cookies = self.getCookies()
 
         self.initGUI()
@@ -224,42 +222,12 @@ class QuizletWindow(QWidget):
         self.box_top.addStretch(1)
         self.setLayout(self.box_top)
 
-        # import by copying the page source code from the web browser
-        # as a way to bypass 403 Forbidden
-        QShortcut(QKeySequence("Ctrl+U"), self, activated=self.getPage)
-        self.text_url.installEventFilter(self) # Fix Ctrl+U on Ubuntu
-
         # go, baby go!
         self.setMinimumWidth(500)
         self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
         self.setWindowTitle("Improved Quizlet to Anki Importer")
         self.resize(self.minimumSizeHint())
         self.show()
-
-    def eventFilter(self, obj: QObject, evt: QEvent):
-        if obj is self.text_url and evt.type() == QEvent.ShortcutOverride:
-            if evt.modifiers() & Qt.ControlModifier and evt.key() == Qt.Key_U:
-                return True
-        return False
-
-    def getPage(self):
-        d = QDialog(self)
-        d.setWindowTitle("Improved Quizlet to Anki Importer")
-        d.setMinimumWidth(400)
-        d.setWindowModality(Qt.WindowModal)
-        l = QVBoxLayout()
-        te = QPlainTextEdit()
-        bb = QDialogButtonBox(QDialogButtonBox.Cancel|QDialogButtonBox.Ok)
-        self.page = ""
-        def setPage():
-            self.page = te.toPlainText()
-            d.accept()
-            self.onCode()
-        bb.accepted.connect(setPage)
-        l.addWidget(te)
-        l.addWidget(bb)
-        d.setLayout(l)
-        d.exec_()
 
     def getCookies(self):
         config = mw.addonManager.getConfig(__name__)
@@ -357,7 +325,7 @@ class QuizletWindow(QWidget):
         #     self.thread.terminate()
 
         # download the data!
-        self.thread = QuizletDownloader(self, deck_url, self.page)
+        self.thread = QuizletDownloader(self, deck_url)
         self.thread.start()
 
         while not self.thread.isFinished():
@@ -388,7 +356,6 @@ class QuizletWindow(QWidget):
 
         # self.thread.terminate()
         self.thread = None
-        self.page = ""
 
     def createDeck(self, result, parentDeck=""):
         config = mw.addonManager.getConfig(__name__)
@@ -526,12 +493,11 @@ class QuizletWindow(QWidget):
 class QuizletDownloader(QThread):
 
     # thread that downloads results from the Quizlet API
-    def __init__(self, window, url, page=""):
+    def __init__(self, window, url):
         super(QuizletDownloader, self).__init__()
         self.window = window
 
         self.url = url
-        self.page = page
         self.results = None
 
         self.error = False
@@ -543,16 +509,12 @@ class QuizletDownloader(QThread):
     def run(self):
         r = None
         try:
-            if self.page:
-                text = self.page
-            else:
-                r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
-                r.raise_for_status()
-                text = r.text
+            r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+            r.raise_for_status()
 
             regex = re.escape('window.Quizlet["setPasswordData"]')
 
-            if re.search(regex, text):
+            if re.search(regex, r.text):
                 self.error = True
                 self.errorCode = 403
                 return
@@ -560,25 +522,25 @@ class QuizletDownloader(QThread):
             regex = re.escape('window.Quizlet["setPageData"] = ')
             regex += r'(.+?)'
             regex += re.escape('; QLoad("Quizlet.setPageData");')
-            m = re.search(regex, text)
+            m = re.search(regex, r.text)
 
             if not m:
                 regex = re.escape('window.Quizlet["assistantModeData"] = ')
                 regex += r'(.+?)'
                 regex += re.escape('; QLoad("Quizlet.assistantModeData");')
-                m = re.search(regex, text)
+                m = re.search(regex, r.text)
 
             if not m:
                 regex = re.escape('window.Quizlet["cardsModeData"] = ')
                 regex += r'(.+?)'
                 regex += re.escape('; QLoad("Quizlet.cardsModeData");')
-                m = re.search(regex, text)
+                m = re.search(regex, r.text)
 
             data = m.group(1).strip()
             self.results = json.loads(data)
 
             title = os.path.basename(self.url.strip()) or "Quizlet Flashcards"
-            m = re.search(r'<title>(.+?)</title>', text)
+            m = re.search(r'<title>(.+?)</title>', r.text)
             if m:
                 title = m.group(1)
                 title = re.sub(r' \| Quizlet$', '', title)
