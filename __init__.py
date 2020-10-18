@@ -204,9 +204,9 @@ class QuizletWindow(QWidget):
         self.box_parent.addWidget(self.parentDeck)
 
         # add layouts to left
-        self.box_left.addLayout(self.box_parent)
-        self.box_left.addLayout(self.box_name)
 
+        self.box_left.addLayout(self.box_name)
+        self.box_left.addLayout(self.box_parent)
         # right side
         self.box_right = QVBoxLayout()
 
@@ -227,7 +227,7 @@ class QuizletWindow(QWidget):
         self.box_upper.addLayout(self.box_right)
 
         # results label
-        self.label_results = QLabel("Example: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
+        self.label_results = QLabel("This importer has three use cases: 1. single url; 2. multiple urls on multiple lines and 3. folder.\n Parent deck name can be cutomized. If not provided, it will either use the folder name \n(if a folder url is provided) or save the deck as a first-level deck.\n\n Single url example: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
 
         # add all widgets to top layout
         self.box_top.addLayout(self.box_upper)
@@ -305,7 +305,10 @@ class QuizletWindow(QWidget):
                 for quizletSet in results["models"]["set"]:
                     if self.closed:
                         return
-                    self.downloadSet(quizletSet["_webUrl"], quzletFolder["name"])
+                    if parentDeck == "":
+                        self.downloadSet(quizletSet["_webUrl"], quzletFolder["name"])
+                    else:
+                        self.downloadSet(quizletSet["_webUrl"], parentDeck)
                     self.sleep(1.5)
 
             self.button_code.setEnabled(True)
