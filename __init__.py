@@ -66,6 +66,10 @@
 
 #               Update 04/09/2020
 #               - move the add-on to GitHub
+
+#               Update 17/10/2020
+#               - added functionality to import multiple urls (with liutiming)
+
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
@@ -189,10 +193,20 @@ class QuizletWindow(QWidget):
 
         self.box_name.addWidget(self.label_url)
         self.box_name.addWidget(self.text_url)
+        # parentDeck field
+
+        self.box_parent = QHBoxLayout()
+        self.label_parentDeck = QLabel("Parent deck name")
+        self.parentDeck = QLineEdit ("",self)
+        self.parentDeck.setMinimumWidth(300)
+
+        self.box_parent.addWidget(self.label_parentDeck)
+        self.box_parent.addWidget(self.parentDeck)
 
         # add layouts to left
-        self.box_left.addLayout(self.box_name)
 
+        self.box_left.addLayout(self.box_name)
+        self.box_left.addLayout(self.box_parent)
         # right side
         self.box_right = QVBoxLayout()
 
@@ -213,7 +227,7 @@ class QuizletWindow(QWidget):
         self.box_upper.addLayout(self.box_right)
 
         # results label
-        self.label_results = QLabel("Example: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
+        self.label_results = QLabel("This importer has three use cases: 1. single url; 2. multiple urls on multiple lines and 3. folder.\n Parent deck name can be cutomized. If not provided, it will either use the folder name \n(if a folder url is provided) or save the deck as a first-level deck.\n\n Single url example: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
 
         # add all widgets to top layout
         self.box_top.addLayout(self.box_upper)
@@ -243,51 +257,61 @@ class QuizletWindow(QWidget):
         return cookies
 
     def onCode(self):
+        parentDeck = self.parentDeck.text()
         # grab url input
-        url = self.text_url.text()
+        report = {'error': [], 'success': []}
+        urls = self.text_url.text().splitlines()
+        self.label_results.setText(("There are <b>{0}</b> urls in total. Starting".format(len(urls))))
+        self.sleep(0.5)
+        for url in urls:
+            if not url:
+                continue
 
-        # voodoo needed for some error handling
-        if urllib.parse.urlparse(url).scheme:
-            urlDomain = urllib.parse.urlparse(url).netloc
-            urlPath = urllib.parse.urlparse(url).path
-        else:
-            urlDomain = urllib.parse.urlparse("https://"+url).netloc
-            urlPath = urllib.parse.urlparse("https://"+url).path
+            # voodoo needed for some error handling
+            if urllib.parse.urlparse(url).scheme:
+                urlDomain = urllib.parse.urlparse(url).netloc
+                urlPath = urllib.parse.urlparse(url).path
+            else:
+                urlDomain = urllib.parse.urlparse("https://"+url).netloc
+                urlPath = urllib.parse.urlparse("https://"+url).path
 
-        # validate quizlet URL
-        if url == "":
-            self.label_results.setText("Oops! You forgot the deck URL :(")
-            return
-        elif not "quizlet.com" in urlDomain:
-            self.label_results.setText("Oops! That's not a Quizlet URL :(")
-            return
+            # validate quizlet URL
+            if url == "":
+                self.label_results.setText("Oops! You forgot the deck URL :(")
+                return
+            elif not "quizlet.com" in urlDomain:
+                self.label_results.setText("Oops! That's not a Quizlet URL :(")
+                return
+            self.button_code.setEnabled(False)
 
-        self.button_code.setEnabled(False)
-
-        if "/folders/" not in url:
-            self.downloadSet(url)
-        else:
-            r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
-            r.raise_for_status()
-
-            regex = re.escape('window.Quizlet["dashboardData"] = ')
-            regex += r'(.+?)'
-            regex += re.escape('; QLoad("Quizlet.dashboardData");')
-
-            m = re.search(regex, r.text)
-
-            data = m.group(1).strip()
-            results = json.loads(data)
-
-            assert len(results["models"]["folder"]) == 1
-            quzletFolder = results["models"]["folder"][0]
-            for quizletSet in results["models"]["set"]:
-                if self.closed:
-                    return
-                self.downloadSet(quizletSet["_webUrl"], quzletFolder["name"])
+            if "/folders/" not in url:
+                self.downloadSet(url, parentDeck)
                 self.sleep(1.5)
+            elif "/folders/" in url :
+                r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
+                r.raise_for_status()
 
-        self.button_code.setEnabled(True)
+                regex = re.escape('window.Quizlet["dashboardData"] = ')
+                regex += r'(.+?)'
+                regex += re.escape('; QLoad("Quizlet.dashboardData");')
+
+                m = re.search(regex, r.text)
+
+                data = m.group(1).strip()
+                results = json.loads(data)
+
+                assert len(results["models"]["folder"]) == 1
+                quzletFolder = results["models"]["folder"][0]
+                for quizletSet in results["models"]["set"]:
+                    if self.closed:
+                        return
+                    if parentDeck == "":
+                        self.downloadSet(quizletSet["_webUrl"], quzletFolder["name"])
+                    else:
+                        self.downloadSet(quizletSet["_webUrl"], parentDeck)
+                    self.sleep(1.5)
+
+            self.button_code.setEnabled(True)
 
     def closeEvent(self, evt):
         self.closed = True
