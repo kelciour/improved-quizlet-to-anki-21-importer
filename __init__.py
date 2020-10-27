@@ -301,10 +301,13 @@ class QuizletWindow(QWidget):
                 results = json.loads(data)
 
                 assert len(results["models"]["folder"]) == 1
+
                 quizletFolder = results["models"]["folder"][0]
-                for quizletSet in results["models"]["set"]:
+                setMap = { s["id"]:s for s in results["models"]["set"] }
+                for folderSet in results["models"]["folderSet"]:
                     if self.closed:
                         return
+                    quizletSet = setMap[folderSet["setId"]]
                     if parentDeck == "":
                         self.downloadSet(quizletSet["_webUrl"], quizletFolder["name"])
                     else:
