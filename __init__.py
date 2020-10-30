@@ -466,7 +466,7 @@ class QuizletWindow(QWidget):
                             attrs = " ".join(['{}="{}"'.format(k, v) for k, v in m['attrs'].items()])
                             text = '<span {}>{}</span>'.format(attrs, text)
                 return text
-            text = ''.join([getText(c) for c in d['content']])
+            text = ''.join([getText(c) if c else '<br>' for c in d.get('content', [''])])
             if d['type'] == 'paragraph':
                 text = '<div>{}</div>'.format(text)
             return text
