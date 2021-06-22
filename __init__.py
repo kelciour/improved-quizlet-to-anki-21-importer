@@ -171,6 +171,7 @@ class QuizletWindow(QWidget):
         self.closed = False
 
         self.page = ""
+        self.data = ""
         self.cloudflare = None
 
         self.cookies = self.getCookies()
@@ -271,7 +272,9 @@ class QuizletWindow(QWidget):
         cs.cookieAdded.connect(onCookieAdded)
         wv.load(QUrl(url))
         bb = QDialogButtonBox(QDialogButtonBox.Cancel|QDialogButtonBox.Ok)
-        def setCookies():
+        self.data = ""
+        def setCookiesAndData(data):
+            self.data = data
             self.cloudflare = RequestsCookieJar()
             for c in self.captcha.allCookies():
                 rq = requests.cookies.create_cookie(name=str(c.name(), 'utf-8'), value=str(c.value(), 'utf-8'))
@@ -279,7 +282,9 @@ class QuizletWindow(QWidget):
                 self.cloudflare.set_cookie(rq)
             d.accept()
             self.onCode()
-        bb.accepted.connect(setCookies)
+        def getData():
+            wp.runJavaScript('window.Quizlet["setPageData"]["title"] = document.title; JSON.stringify(window.Quizlet["setPageData"])', setCookiesAndData)
+        bb.accepted.connect(getData)
         bb.rejected.connect(d.reject)
         l.addWidget(wv)
         l.addWidget(bb)
@@ -404,7 +409,7 @@ class QuizletWindow(QWidget):
         #     self.thread.terminate()
 
         # download the data!
-        self.thread = QuizletDownloader(self, deck_url, self.page)
+        self.thread = QuizletDownloader(self, deck_url, self.page, self.data)
         self.thread.start()
 
         while not self.thread.isFinished():
@@ -436,6 +441,7 @@ class QuizletWindow(QWidget):
         # self.thread.terminate()
         self.thread = None
         self.page = ""
+        self.data = ""
 
     def createDeck(self, result, parentDeck=""):
         config = mw.addonManager.getConfig(__name__)
@@ -573,12 +579,13 @@ class QuizletWindow(QWidget):
 class QuizletDownloader(QThread):
 
     # thread that downloads results from the Quizlet API
-    def __init__(self, window, url, page=""):
+    def __init__(self, window, url, page="", data=""):
         super(QuizletDownloader, self).__init__()
         self.window = window
 
         self.url = url
         self.page = page
+        self.data = data
         self.results = None
 
         self.error = False
@@ -590,49 +597,55 @@ class QuizletDownloader(QThread):
     def run(self):
         r = None
         try:
-            if self.page:
-                text = self.page
+            if self.data:
+                self.results = json.loads(self.data)
             else:
-                r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
-                r.raise_for_status()
-                text = r.text
+                if self.page:
+                    text = self.page
+                else:
+                    r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+                    r.raise_for_status()
+                    text = r.text
 
-            regex = re.escape('window.Quizlet["setPasswordData"]')
+                regex = re.escape('window.Quizlet["setPasswordData"]')
 
-            if re.search(regex, text):
-                self.error = True
-                self.errorCode = 403
-                return
+                if re.search(regex, text):
+                    self.error = True
+                    self.errorCode = 403
+                    return
 
-            regex = re.escape('window.Quizlet["setPageData"] = ')
-            regex += r'(.+?)'
-            regex += re.escape('; QLoad("Quizlet.setPageData");')
-            m = re.search(regex, text)
-
-            if not m:
-                regex = re.escape('window.Quizlet["assistantModeData"] = ')
+                regex = re.escape('window.Quizlet["setPageData"] = ')
                 regex += r'(.+?)'
-                regex += re.escape('; QLoad("Quizlet.assistantModeData");')
+                regex += re.escape('; QLoad("Quizlet.setPageData");')
                 m = re.search(regex, text)
 
-            if not m:
-                regex = re.escape('window.Quizlet["cardsModeData"] = ')
-                regex += r'(.+?)'
-                regex += re.escape('; QLoad("Quizlet.cardsModeData");')
-                m = re.search(regex, text)
+                if not m:
+                    regex = re.escape('window.Quizlet["assistantModeData"] = ')
+                    regex += r'(.+?)'
+                    regex += re.escape('; QLoad("Quizlet.assistantModeData");')
+                    m = re.search(regex, text)
 
-            data = m.group(1).strip()
-            self.results = json.loads(data)
+                if not m:
+                    regex = re.escape('window.Quizlet["cardsModeData"] = ')
+                    regex += r'(.+?)'
+                    regex += re.escape('; QLoad("Quizlet.cardsModeData");')
+                    m = re.search(regex, text)
 
-            title = os.path.basename(self.url.strip()) or "Quizlet Flashcards"
-            m = re.search(r'<title>(.+?)</title>', text)
-            if m:
-                title = m.group(1)
-                title = re.sub(r' \| Quizlet$', '', title)
-                title = re.sub(r'^Flashcards ', '', title)
-                title = re.sub(r'\s+', ' ', title)
-                title = title.strip()
-            self.results['title'] = title
+                self.data = m.group(1).strip()
+
+                title = os.path.basename(self.url.strip()) or "Quizlet Flashcards"
+                m = re.search(r'<title>(.+?)</title>', text)
+                if m:
+                    title = m.group(1)
+                    title = re.sub(r' \| Quizlet$', '', title)
+                    title = re.sub(r'^Flashcards ', '', title)
+                    title = re.sub(r'\s+', ' ', title)
+                    title = title.strip()
+
+                self.results = json.loads(self.data)
+
+                self.results['title'] = title
+
         except requests.HTTPError as e:
             self.error = True
             self.errorCode = e.response.status_code
