@@ -167,6 +167,8 @@ def bypassCaptchaChallenge(scraper, url, **kwargs):
         try:
             r = scraper.get(url, **kwargs)
         except CloudflareChallengeError:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper()
             time.sleep(0.1)
             continue
         return r
