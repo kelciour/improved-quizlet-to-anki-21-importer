@@ -82,11 +82,16 @@ from anki.utils import checksum
 import requests
 import shutil
 
+addon_dir = os.path.dirname(os.path.realpath(__file__))
+vendor_dir = os.path.join(addon_dir, "vendor")
+sys.path.append(vendor_dir)
+
 from requests.cookies import RequestsCookieJar
 
 requests.packages.urllib3.disable_warnings()
 
 headers = {
+  "Accept-Language": "en-US,en;q=0.9,*;q=0.5",
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36"
 }
 
@@ -173,6 +178,7 @@ class QuizletWindow(QWidget):
         self.page = ""
         self.data = ""
         self.cloudflare = None
+        self.scraper = None
 
         self.cookies = self.getCookies()
 
@@ -351,7 +357,14 @@ class QuizletWindow(QWidget):
         if "/folders/" not in url:
             self.downloadSet(url)
         else:
-            r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
+            if self.scraper:
+                r = self.scraper.get(url, verify=False, headers=headers, cookies=self.cookies)
+            else:
+                r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
+                if r.status_code == 403:
+                    import cloudscraper
+                    self.scraper = cloudscraper.create_scraper()
+                    r = self.scraper.get(url, verify=False, headers=headers, cookies=self.cookies)
             r.raise_for_status()
 
             regex = re.escape('window.Quizlet["dashboardData"] = ')
@@ -569,7 +582,15 @@ class QuizletWindow(QWidget):
         url = url.replace('_m', '')
         file_name = "quizlet-" + url.split('/')[-1]
         # get original, non-mobile version of images
-        r = requests.get(url, stream=True, verify=False, headers=headers)
+        if self.scraper:
+            r = self.scraper.get(url, stream=True, verify=False, headers=headers)
+        else:
+            r = requests.get(url, stream=True, verify=False, headers=headers)
+            if r.status_code == 403:
+                import cloudscraper
+                self.scraper = cloudscraper.create_scraper()
+                r = self.scraper.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+
         if r.status_code == 200:
             with open(file_name, 'wb') as f:
                 r.raw.decode_content = True
@@ -603,7 +624,14 @@ class QuizletDownloader(QThread):
                 if self.page:
                     text = self.page
                 else:
-                    r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+                    if self.window.scraper:
+                        r = self.window.scraper.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+                    else:
+                        r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+                        if r.status_code == 403:
+                            import cloudscraper
+                            self.window.scraper = cloudscraper.create_scraper()
+                            r = self.window.scraper.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
                     r.raise_for_status()
                     text = r.text
 
