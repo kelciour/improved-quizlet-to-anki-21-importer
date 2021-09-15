@@ -91,7 +91,6 @@ from requests.cookies import RequestsCookieJar
 requests.packages.urllib3.disable_warnings()
 
 headers = {
-  "Accept-Language": "en-US,en;q=0.9,*;q=0.5",
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36"
 }
 
@@ -161,6 +160,14 @@ def addCustomModel(name, col):
 # throw up a window with some info (used for testing)
 def debug(message):
     QMessageBox.information(QWidget(), "Message", message)
+
+def bypassCaptchaChallenge(scraper, url, **kwargs):
+    for _ in range(50):
+        r = scraper.get(url, **kwargs)
+        if r.status_code == 403:
+            continue
+        time.sleep(0.1)
+        return r
 
 class QuizletWindow(QWidget):
 
@@ -358,13 +365,13 @@ class QuizletWindow(QWidget):
             self.downloadSet(url)
         else:
             if self.scraper:
-                r = self.scraper.get(url, verify=False, headers=headers, cookies=self.cookies)
+                r = bypassCaptchaChallenge(self.scraper, url)
             else:
                 r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
                 if r.status_code == 403:
                     import cloudscraper
                     self.scraper = cloudscraper.create_scraper()
-                    r = self.scraper.get(url, verify=False, headers=headers, cookies=self.cookies)
+                    r = bypassCaptchaChallenge(self.scraper, url)
             r.raise_for_status()
 
             regex = re.escape('window.Quizlet["dashboardData"] = ')
@@ -583,13 +590,13 @@ class QuizletWindow(QWidget):
         file_name = "quizlet-" + url.split('/')[-1]
         # get original, non-mobile version of images
         if self.scraper:
-            r = self.scraper.get(url, stream=True, verify=False, headers=headers)
+            r = bypassCaptchaChallenge(self.scraper, url, stream=True)
         else:
             r = requests.get(url, stream=True, verify=False, headers=headers)
             if r.status_code == 403:
                 import cloudscraper
                 self.scraper = cloudscraper.create_scraper()
-                r = self.scraper.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+                r = bypassCaptchaChallenge(self.scraper, url, stream=True)
 
         if r.status_code == 200:
             with open(file_name, 'wb') as f:
@@ -625,13 +632,13 @@ class QuizletDownloader(QThread):
                     text = self.page
                 else:
                     if self.window.scraper:
-                        r = self.window.scraper.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+                        r = bypassCaptchaChallenge(self.window.scraper, self.url)
                     else:
                         r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
                         if r.status_code == 403:
                             import cloudscraper
                             self.window.scraper = cloudscraper.create_scraper()
-                            r = self.window.scraper.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+                            r = bypassCaptchaChallenge(self.window.scraper, self.url)
                     r.raise_for_status()
                     text = r.text
 
