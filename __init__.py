@@ -162,11 +162,13 @@ def debug(message):
     QMessageBox.information(QWidget(), "Message", message)
 
 def bypassCaptchaChallenge(scraper, url, **kwargs):
+    from cloudscraper.exceptions import CloudflareChallengeError
     for _ in range(50):
-        r = scraper.get(url, **kwargs)
-        if r.status_code == 403:
+        try:
+            r = scraper.get(url, **kwargs)
+        except CloudflareChallengeError:
+            time.sleep(0.1)
             continue
-        time.sleep(0.1)
         return r
 
 class QuizletWindow(QWidget):
