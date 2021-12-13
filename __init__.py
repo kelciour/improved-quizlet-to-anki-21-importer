@@ -79,6 +79,11 @@ from aqt.qt import *
 from aqt.utils import showText, tooltip
 from anki.utils import checksum
 
+try:
+    from PyQt5.QtNetwork import QNetworkCookieJar
+except:
+    from PyQt6.QtNetwork import QNetworkCookieJar
+
 import requests
 import shutil
 
@@ -172,8 +177,6 @@ class QuizletWindow(QWidget):
 
         self.page = ""
         self.data = ""
-        self.cloudflare = None
-
         self.cookies = self.getCookies()
 
         self.initGUI()
@@ -233,7 +236,7 @@ class QuizletWindow(QWidget):
         QShortcut(QKeySequence("Ctrl+U"), self, activated=self.getPage)
         self.text_url.installEventFilter(self) # Fix Ctrl+U on Ubuntu
 
-        QShortcut(QKeySequence("Ctrl+G"), self, activated=self.resolveCaptcha)
+        # QShortcut(QKeySequence("Ctrl+G"), self, activated=self.resolveCaptcha)
 
         # go, baby go!
         self.setMinimumWidth(500)
@@ -248,8 +251,8 @@ class QuizletWindow(QWidget):
                 return True
         return False
 
-    def resolveCaptcha(self):
-        url = self.text_url.text().strip()
+    def resolveCaptcha(self, url):
+        url = url.strip()
         if not url:
             tooltip("Oops! You forgot the Quizlet URL :(")
             return
@@ -275,13 +278,15 @@ class QuizletWindow(QWidget):
         self.data = ""
         def setCookiesAndData(data):
             self.data = data
-            self.cloudflare = RequestsCookieJar()
+            self.cookies = RequestsCookieJar()
             for c in self.captcha.allCookies():
                 rq = requests.cookies.create_cookie(name=str(c.name(), 'utf-8'), value=str(c.value(), 'utf-8'))
                 rq.domain = c.domain()
-                self.cloudflare.set_cookie(rq)
+                self.cookies.set_cookie(rq)
+            wp.runJavaScript('JSON.stringify(window.Quizlet["dashboardData"])', getDashboardData)
+        def getDashboardData(text):
+            self.dashboard_data = text
             d.accept()
-            self.onCode()
         def getData():
             wp.runJavaScript('window.Quizlet["setPageData"]["title"] = document.title; JSON.stringify(window.Quizlet["setPageData"])', setCookiesAndData)
         bb.accepted.connect(getData)
@@ -323,6 +328,17 @@ class QuizletWindow(QWidget):
             cookies = { key: morsel.value for key, morsel in C.items() }
         return cookies
 
+    def downloadPage(self, url, *args, **kwargs):
+        self.page = ''
+        self.data = ''
+        self.dashboard_data = ''
+        try:
+            r = requests.get(url, *args, **kwargs)
+            r.raise_for_status()
+            self.page = r.text
+        except Exception as e:
+            self.resolveCaptcha(url)
+
     def onCode(self):
         # grab url input
         url = self.text_url.text()
@@ -345,23 +361,21 @@ class QuizletWindow(QWidget):
 
         self.button_code.setEnabled(False)
 
-        if self.cloudflare:
-            self.cookies = self.cloudflare
-
         if "/folders/" not in url:
             self.downloadSet(url)
         else:
-            r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
-            r.raise_for_status()
+            self.downloadPage(url, verify=False, headers=headers, cookies=self.cookies, timeout=15)
 
-            regex = re.escape('window.Quizlet["dashboardData"] = ')
-            regex += r'(.+?)'
-            regex += re.escape('; QLoad("Quizlet.dashboardData");')
+            if not self.dashboard_data:
+                regex = re.escape('window.Quizlet["dashboardData"] = ')
+                regex += r'(.+?)'
+                regex += re.escape('; QLoad("Quizlet.dashboardData");')
+                m = re.search(regex, self.page)
+                self.dashboard_data = m.group(1).strip()
 
-            m = re.search(regex, r.text)
-
-            data = m.group(1).strip()
-            results = json.loads(data)
+            results = json.loads(self.dashboard_data)
+            self.data = ''
+            self.dashboard_data = ''
 
             assert len(results["models"]["folder"]) == 1
             quzletFolder = results["models"]["folder"][0]
@@ -409,7 +423,8 @@ class QuizletWindow(QWidget):
         #     self.thread.terminate()
 
         # download the data!
-        self.thread = QuizletDownloader(self, deck_url, self.page, self.data)
+        self.downloadPage(deck_url, verify=False, headers=headers, cookies=self.cookies, timeout=15)
+        self.thread = QuizletDownloader(self, deck_url, page=self.page, data=self.data)
         self.thread.start()
 
         while not self.thread.isFinished():
@@ -569,7 +584,7 @@ class QuizletWindow(QWidget):
         url = url.replace('_m', '')
         file_name = "quizlet-" + url.split('/')[-1]
         # get original, non-mobile version of images
-        r = requests.get(url, stream=True, verify=False, headers=headers)
+        r = requests.get(url, stream=True, verify=False, headers=headers, timeout=15)
         if r.status_code == 200:
             with open(file_name, 'wb') as f:
                 r.raw.decode_content = True
@@ -581,9 +596,8 @@ class QuizletDownloader(QThread):
     # thread that downloads results from the Quizlet API
     def __init__(self, window, url, page="", data=""):
         super(QuizletDownloader, self).__init__()
-        self.window = window
-
         self.url = url
+        self.window = window
         self.page = page
         self.data = data
         self.results = None
@@ -600,12 +614,7 @@ class QuizletDownloader(QThread):
             if self.data:
                 self.results = json.loads(self.data)
             else:
-                if self.page:
-                    text = self.page
-                else:
-                    r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
-                    r.raise_for_status()
-                    text = r.text
+                text = self.page
 
                 regex = re.escape('window.Quizlet["setPasswordData"]')
 
@@ -630,6 +639,8 @@ class QuizletDownloader(QThread):
                     regex += r'(.+?)'
                     regex += re.escape('; QLoad("Quizlet.cardsModeData");')
                     m = re.search(regex, text)
+
+                assert m, 'NO MATCH\n\n' + text
 
                 self.data = m.group(1).strip()
 
