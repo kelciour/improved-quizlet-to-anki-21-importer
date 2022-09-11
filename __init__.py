@@ -118,10 +118,6 @@ rich_text_css = """
 }
 """
 
-# Temp Fix for Failed Image Download. Store Locally
-addon_path = os.path.dirname(__file__)
-quizletImages = os.path.join(addon_path, "quizlet_images")
-
 # add custom model if needed
 def addCustomModel(name, col):
 
@@ -512,11 +508,12 @@ class QuizletWindow(QWidget):
     # download the images
     def fileDownloader(self, url):
         url = url.replace('_m', '')
-        file_name = quizletImages + "/quizlet-" + url.split('/')[-1]
+        file_name = "quizlet-" + url.split('/')[-1]
+        save_file = mw.col.media.dir() + "/" + file_name
         # get original, non-mobile version of images
         r = requests.get(url, stream=True, verify=False, headers=headers)
         if r.status_code == 200:
-            with open(file_name, 'wb') as f:
+            with open(save_file, 'wb') as f:
                 r.raw.decode_content = True
                 shutil.copyfileobj(r.raw, f)
         return file_name

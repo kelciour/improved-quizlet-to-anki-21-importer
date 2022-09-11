@@ -1,1 +1,0 @@
-Image Storage Folder
