@@ -509,10 +509,11 @@ class QuizletWindow(QWidget):
     def fileDownloader(self, url):
         url = url.replace('_m', '')
         file_name = "quizlet-" + url.split('/')[-1]
+        save_file = mw.col.media.dir() + "/" + file_name
         # get original, non-mobile version of images
         r = requests.get(url, stream=True, verify=False, headers=headers)
         if r.status_code == 200:
-            with open(file_name, 'wb') as f:
+            with open(save_file, 'wb') as f:
                 r.raw.decode_content = True
                 shutil.copyfileobj(r.raw, f)
         return file_name
