@@ -88,8 +88,21 @@ import shutil
 
 requests.packages.urllib3.disable_warnings()
 
-headers = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36"
+sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
+
+from curl_cffi import requests as curl_requests
+
+
+rich_text_css_light_background_colors = {
+    "bgY": "#fff4e5",
+    "bgB": "#cde7fa",
+    "bgP": "#fde8ff"
+}
+
+rich_text_css_dark_background_colors = {
+    "bgY": "#8c7620",
+    "bgB": "#295f87",
+    "bgP": "#7d537f",
 }
 
 rich_text_css = """
@@ -106,63 +119,95 @@ rich_text_css = """
 }
 
 .bgY {
-  background-color: var(--yellow_light_background);
+  background-color: var(--yellow_light_background) !important;
 }
 
 .bgB {
-  background-color: var(--blue_light_background);
+  background-color: var(--blue_light_background) !important;
 }
 
 .bgP {
-  background-color: var(--pink_light_background);
+  background-color: var(--pink_light_background) !important;
 }
 """
 
 # add custom model if needed
-def addCustomModel(name, col):
+def addCustomModel(name, col, config):
 
     # create custom model for imported deck
     mm = col.models
-    existing = mm.byName("Basic Quizlet")
+    existing = mm.by_name("Basic Quizlet")
     if existing:
-        fields = mm.fieldNames(existing)
-        if "Front" in fields and "Back" in fields:
-            return existing
+        fields = mm.field_names(existing)
+        if "Front" in fields and "Back" in fields and "Image" in fields:
+            if not config["add_audio"]:
+                return existing
+            elif "Front Audio" in fields and "Back Audio" in fields:
+                return existing
         else:
             existing['name'] += "-" + checksum(str(time.time()))[:5]
             mm.save(existing)
     m = mm.new("Basic Quizlet")
 
     # add fields
-    mm.addField(m, mm.newField("Front"))
-    mm.addField(m, mm.newField("Back"))
-    mm.addField(m, mm.newField("Add Reverse"))
+    mm.add_field(m, mm.new_field("Front"))
+    mm.add_field(m, mm.new_field("Back"))
+    mm.add_field(m, mm.new_field("Image"))
+    mm.add_field(m, mm.new_field("Add Reverse"))
+    if config["add_audio"]:
+        mm.add_field(m, mm.new_field("Front Audio"))
+        mm.add_field(m, mm.new_field("Back Audio"))
 
     # add cards
-    t = mm.newTemplate("Normal")
+    t = mm.new_template("Forward")
 
     # front
-    t['qfmt'] = "{{Front}}"
-    t['afmt'] = "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}"
+    if not config["add_audio"]:
+        t['qfmt'] = "{{Front}}"
+        t['afmt'] = "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}\n\n<div>{{Image}}</div>"
+    else:
+        t['qfmt'] = "{{Front}}\n\n{{#Front Audio}}\n<div>{{Front Audio}}</div>\n{{/Front Audio}}"
+        t['afmt'] = "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}\n\n{{#Back Audio}}<div>{{Back Audio}}</div>{{/Back Audio}}\n\n<div>{{Image}}</div>"
     mm.addTemplate(m, t)
 
     # back
-    t = mm.newTemplate("Reverse")
-    t['qfmt'] = "{{#Add Reverse}}{{Back}}{{/Add Reverse}}"
-    t['afmt'] = "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}"
-    mm.addTemplate(m, t)
+    t = mm.new_template("Reverse")
+    if not config["add_audio"]:
+        t['qfmt'] = "{{#Add Reverse}}\n\n{{Back}}\n\n<div>{{Image}}</div>\n\n{{/Add Reverse}}"
+        t['afmt'] = "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}"
+    else:
+        t['qfmt'] = "{{#Add Reverse}}\n\n{{Back}}\n\n{{#Back Audio}}<div>{{Back Audio}}</div>{{/Back Audio}}\n\n<div>{{Image}}</div>\n\n{{/Add Reverse}}"
+        t['afmt'] = "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}\n\n{{#Front Audio}}\n<div>{{Front Audio}}</div>\n{{/Front Audio}}"
+    mm.add_template(m, t)
+
+    m["css"] = """.card {
+    font-family: arial;
+    font-size: 20px;
+    line-height: 1.5;
+    text-align: center;
+    color: black;
+    background-color: white;
+}
+
+img {
+    margin-top: 1em;
+}
+"""
+
+    m["css"] += rich_text_css
+
+    if config["add_audio"]:
+        m["css"] += """
+.replay-button {
+    margin-top: 0.5em;
+}
+"""
 
     mm.add(m)
     return m
 
-# throw up a window with some info (used for testing)
-def debug(message):
-    QMessageBox.information(QWidget(), "Message", message)
 
 class QuizletWindow(QWidget):
-
-    # used to access Quizlet API
-    __APIKEY = "ke9tZw8YM6"
 
     # main window of Quizlet plugin
     def __init__(self):
@@ -172,6 +217,8 @@ class QuizletWindow(QWidget):
         self.thread = None
         self.closed = False
 
+        self.config = mw.addonManager.getConfig(__name__)
+
         self.cookies = self.getCookies()
 
         self.initGUI()
@@ -180,93 +227,103 @@ class QuizletWindow(QWidget):
     def initGUI(self):
 
         self.box_top = QVBoxLayout()
-        self.box_upper = QHBoxLayout()
 
         # left side
         self.box_left = QVBoxLayout()
 
         # quizlet url field
         self.box_name = QHBoxLayout()
-        self.label_url = QLabel("Quizlet URL:")
-        self.text_url = QLineEdit("",self)
+        self.label_url = QLabel("Quizlet URL(s):")
+        self.text_url = QTextEdit("",self)
+        self.text_url.setAcceptRichText(False)
         self.text_url.setMinimumWidth(300)
+
+        self.text_url.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        font_metrics = QFontMetrics(self.text_url.font())
+        line_height = font_metrics.height()
+        doc_margin = self.text_url.document().documentMargin()
+        margins = self.text_url.contentsMargins()
+        total_height = line_height + margins.top() + margins.bottom() + (2 * doc_margin)
+        self.text_url.setFixedHeight(int(total_height))
+        self.text_url.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.text_url.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.text_url.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
+        def autoResize():
+            self.text_url.document().setTextWidth(self.text_url.viewport().width())
+            margins = self.text_url.contentsMargins()
+            height = int(self.text_url.document().size().height() + margins.top() + margins.bottom())
+            self.text_url.setFixedHeight(height)
+            self.resize(self.minimumSizeHint())
+        self.text_url.textChanged.connect(autoResize)
 
         self.box_name.addWidget(self.label_url)
         self.box_name.addWidget(self.text_url)
         # parentDeck field
 
         self.box_parent = QHBoxLayout()
-        self.label_parentDeck = QLabel("Parent deck name")
+        self.label_parentDeck = QLabel("Parent deck name:")
         self.parentDeck = QLineEdit ("",self)
-        self.parentDeck.setMinimumWidth(300)
-
+        self.parentDeck.setMinimumWidth(150)
         self.box_parent.addWidget(self.label_parentDeck)
         self.box_parent.addWidget(self.parentDeck)
 
-        # add layouts to left
-
-        self.box_left.addLayout(self.box_name)
-        self.box_left.addLayout(self.box_parent)
-        # right side
-        self.box_right = QVBoxLayout()
+        self.box_options = QHBoxLayout()
+        self.reverse_checkbox = QCheckBox('Add Reverse?', self)
+        self.reverse_checkbox.setChecked(self.config["add_reverse"])
+        self.box_options.addWidget(self.reverse_checkbox)
+        self.box_options.addStretch(1)
 
         # code (import set) button
         self.box_code = QHBoxLayout()
         self.button_code = QPushButton("Import Deck", self)
-        self.button_code.setShortcut(QKeySequence("Return"))
+        self.button_code.setShortcut(QKeySequence("Ctrl+Return"))
         self.box_code.addStretch(1)
         self.box_code.addWidget(self.button_code)
         self.button_code.clicked.connect(self.onCode)
 
-        # add layouts to right
-        self.box_right.addLayout(self.box_code)
-
-        # add left and right layouts to upper
-        self.box_upper.addLayout(self.box_left)
-        self.box_upper.addSpacing(20)
-        self.box_upper.addLayout(self.box_right)
-
         # results label
-        self.label_results = QLabel("This importer has three use cases: 1. single url; 2. multiple urls on multiple lines and 3. folder.\n Parent deck name can be cutomized. If not provided, it will either use the folder name \n(if a folder url is provided) or save the deck as a first-level deck.\n\n Single url example: https://quizlet.com/515858716/japanese-shops-fruit-flash-cards/")
+        self.label_info = QLabel("This importer has three use cases: 1. single url; 2. multiple urls on multiple lines and 3. folder.\nParent deck name can be cutomized. If not provided, it will either use the folder name \n(if a folder url is provided) or save the deck as a first-level deck.")
+        self.label_results = QLabel("Single url example: https://quizlet.com/vn/160732581/les-activites-flash-cards/")
 
         # add all widgets to top layout
-        self.box_top.addLayout(self.box_upper)
+        self.box_top.addLayout(self.box_name)
+        self.box_top.addLayout(self.box_parent)
+        self.box_top.addLayout(self.box_options)
+        self.box_top.addLayout(self.box_code)
+        self.box_top.addSpacing(10)
+        self.box_top.addWidget(self.label_info)
         self.box_top.addSpacing(10)
         self.box_top.addWidget(self.label_results)
-        self.box_top.addStretch(1)
         self.setLayout(self.box_top)
 
         # go, baby go!
         self.setMinimumWidth(500)
-        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         self.setWindowTitle("Improved Quizlet to Anki Importer")
         self.resize(self.minimumSizeHint())
+        self.setWindowIcon(QIcon('icon.png'))
         self.show()
 
     def getCookies(self):
-        config = mw.addonManager.getConfig(__name__)
-
         cookies = {}
-        if config["qlts"]:
-            cookies = { "qlts": config["qlts"] }
-        elif config["cookies"]:
-            from http.cookies import SimpleCookie
-            C = SimpleCookie()
-            C.load(config["cookies"])
-            cookies = { key: morsel.value for key, morsel in C.items() }
+        if self.config["qlts"]:
+            cookies = { "qlts": self.config["qlts"] }
         return cookies
 
     def onCode(self):
+        self.config["add_reverse"] = self.reverse_checkbox.isChecked()
+        mw.addonManager.writeConfig(__name__, self.config)
+
         parentDeck = self.parentDeck.text()
         # grab url input
         report = {'error': [], 'success': []}
-        urls = self.text_url.text().splitlines()
+        urls = self.text_url.toPlainText().splitlines()
+        urls = [url.strip() for url in urls if url.strip() != ""]
+        if not urls:
+            return
         self.label_results.setText(("There are <b>{0}</b> urls in total. Starting".format(len(urls))))
         self.sleep(0.5)
+        urls_results = []
         for url in urls:
-            if not url:
-                continue
-
             # voodoo needed for some error handling
             if urllib.parse.urlparse(url).scheme:
                 urlDomain = urllib.parse.urlparse(url).netloc
@@ -288,23 +345,23 @@ class QuizletWindow(QWidget):
                 self.downloadSet(url, parentDeck)
                 self.sleep(1.5)
             elif "/folders/" in url :
-                r = requests.get(url, verify=False, headers=headers, cookies=self.cookies)
+                r = curl_requests.get(url, cookies=self.cookies, impersonate="chrome")
                 r.raise_for_status()
 
-                regex = re.escape('window.Quizlet["dashboardData"] = ')
+                regex = re.escape('<script id="__NEXT_DATA__" type="application/json">')
                 regex += r'(.+?)'
-                regex += re.escape('; QLoad("Quizlet.dashboardData");')
+                regex += re.escape('</script>')
 
                 m = re.search(regex, r.text)
 
                 data = m.group(1).strip()
-                results = json.loads(data)
+                results = json.loads(data)["props"]["pageProps"]
 
                 assert len(results["models"]["folder"]) == 1
 
                 quizletFolder = results["models"]["folder"][0]
                 setMap = { s["id"]:s for s in results["models"]["set"] }
-                for folderSet in results["models"]["folderSet"]:
+                for folderSet in results["models"]["folderStudyMaterial"]:
                     if self.closed:
                         return
                     quizletSet = setMap[folderSet["setId"]]
@@ -314,7 +371,12 @@ class QuizletWindow(QWidget):
                         self.downloadSet(quizletSet["_webUrl"], parentDeck)
                     self.sleep(1.5)
 
-            self.button_code.setEnabled(True)
+            urls_results.append(self.label_results.text())
+
+        self.button_code.setEnabled(True)
+
+        if len(urls_results) > 1:
+            self.label_results.setText('<br>'.join(urls_results))
 
     def closeEvent(self, evt):
         self.closed = True
@@ -342,17 +404,14 @@ class QuizletWindow(QWidget):
         self.label_results.setText("Connecting to Quizlet...")
 
         # build URL
-        # deck_url = ("https://api.quizlet.com/2.0/sets/{0}".format(quizletDeckID))
-        # deck_url += ("?client_id={0}".format(QuizletWindow.__APIKEY))
-        # deck_url = "https://quizlet.com/{}/flashcards".format(quizletDeckID)
-        deck_url = urlPath
+        deck_url = "https://quizlet.com/{}/flashcards".format(quizletDeckID)
 
         # stop previous thread first
         # if self.thread is not None:
         #     self.thread.terminate()
 
         # download the data!
-        self.thread = QuizletDownloader(self, deck_url)
+        self.thread = QuizletDownloader(self, deck_url, self.cookies)
         self.thread.start()
 
         while not self.thread.isFinished():
@@ -363,34 +422,24 @@ class QuizletWindow(QWidget):
         if self.thread.error:
             if self.thread.errorCode == 403:
                 if self.thread.errorCaptcha:
-                    self.label_results.setText("Sorry, it's behind a captcha. Try to disable VPN")
+                    self.label_results.setText("Sorry, it's behind a captcha.")
                 else:
                     self.label_results.setText("Sorry, this is a private deck :(")
             elif self.thread.errorCode == 404:
                 self.label_results.setText("Can't find a deck with the ID <i>{0}</i>".format(quizletDeckID))
             else:
                 self.label_results.setText("Unknown Error")
-                # errorMessage = json.loads(self.thread.errorMessage)
-                # showText(json.dumps(errorMessage, indent=4))
                 showText(self.thread.errorMessage)
         else: # everything went through, let's roll!
             deck = self.thread.results
-            # self.label_results.setText(("Importing deck {0} by {1}...".format(deck["title"], deck["created_by"])))
             self.label_results.setText(("Importing deck {0}...".format(deck["title"])))
-            self.createDeck(deck, parentDeck)
-            # self.label_results.setText(("Success! Imported <b>{0}</b> ({1} cards by <i>{2}</i>)".format(deck["title"], deck["term_count"], deck["created_by"])))
+            self.createDeck(deck, quizletDeckID, parentDeck)
             self.label_results.setText(("Success! Imported <b>{0}</b> ({1} cards)".format(deck["title"], deck["term_count"])))
 
         # self.thread.terminate()
         self.thread = None
 
-    def createDeck(self, result, parentDeck=""):
-        config = mw.addonManager.getConfig(__name__)
-
-        if config["rich_text_formatting"] and not os.path.exists("_quizlet.css"):
-            with open("_quizlet.css", "w") as f:
-                f.write(rich_text_css.lstrip())
-
+    def createDeck(self, result, quizletDeckID, parentDeck=""):
         # create new deck and custom model
         if "set" in result:
             name = result['set']['title']
@@ -402,59 +451,78 @@ class QuizletWindow(QWidget):
         if parentDeck:
             name = "{}::{}".format(parentDeck, name)
 
-        if "termIdToTermsMap" in result:
+        try:
+            meta = result["setPage"]["pagingMeta"]
+        except:
+            meta = None
+
+        if meta and meta["total"] > meta["perPage"]:
             terms = []
-            for c in sorted(result['termIdToTermsMap'].values(), key=lambda v: v["rank"]):
-                terms.append({
-                    'word': c['word'],
-                    'definition': c['definition'],
-                    '_imageUrl': c["_imageUrl"] or '',
-                    'wordRichText': c.get('wordRichText', ''),
-                    'definitionRichText': c.get('definitionRichText', ''),
-                })
-        elif "studiableData" in result:
-            terms = {}
-            data = result["studiableData"]
-            for d in data["studiableItems"]:
-                terms[d["id"]] = {}
-            smc = {}
-            for d in data["studiableMediaConnections"]:
-                id_ = d["connectionModelId"]
-                if id_ not in smc:
-                    smc[id_] = {}
-                # "plainText", "languageCode", "ttsUrl", "ttsSlowUrl", "richText"
-                for k, v in d.get("text", {}).items():
-                    smc[id_][k] = v
-                if "image" in d:
-                    smc[id_]["_imageUrl"] = d["image"]["url"]
-            for d in data["studiableCardSides"]:
-                id_ = d["studiableItemId"]
-                terms[id_][d["label"]] = smc[d["id"]].get("plainText", "")
-                terms[id_]["{}RichText".format(d["label"])] = smc[d["id"]].get("richText", "")
-                terms[id_]["_imageUrl"] = smc[d["id"]].get("_imageUrl", "")
-            terms = terms.values()
+            page = 1
+            while True:
+                url = f'https://quizlet.com/webapi/3.4/studiable-item-documents?pagingToken={meta["token"]}&page={page}&perPage=100&filters%5BstudiableContainerId%5D={quizletDeckID}&filters%5BstudiableContainerType%5D=1'
+                r = curl_requests.get(url, cookies=self.cookies, impersonate="chrome")
+                for resp in r.json()["responses"]:
+                    for item in resp["models"]["studiableItem"]:
+                        d = {
+                            '_imageUrl': '',
+                            'wordRichText': '',
+                            'definitionRichText': '',
+                            'wordTTS': '',
+                            'definitionTTS': '',
+                        }
+                        for cs in item["cardSides"]:
+                            label = cs["label"]
+                            for media in cs["media"]:
+                                if "plainText" in media:
+                                    d[label] = media["plainText"]
+                                    d[f"{label}TTS"] = media["ttsUrl"]
+                                    d[f"{label}RichText"] = media.get("richText", "")
+                                if media['type'] == 2:
+                                    d["_imageUrl"] = media["url"]
+                        terms.append(d)
+                if len(terms) >= meta["total"]:
+                    break
+                page += 1
+        elif "studyModesCommon" in result:
+            terms = []
+            for item in result["studyModesCommon"]["studiableData"]["studiableItems"]:
+                d = {
+                    '_imageUrl': '',
+                    'wordRichText': '',
+                    'definitionRichText': '',
+                    'wordTTS': '',
+                    'definitionTTS': '',
+                }
+                for cs in item["cardSides"]:
+                    label = cs["label"]
+                    for media in cs["media"]:
+                        if "plainText" in media:
+                            d[label] = media["plainText"]
+                            d[f"{label}TTS"] = media["ttsUrl"]
+                            d[f"{label}RichText"] = media.get("richText", "")
+                        if media['type'] == 2:
+                            d["_imageUrl"] = media["url"]
+                terms.append(d)
         else:
-            terms = result['terms']
+            raise Exception('NO MATCH\n\n' + result)
 
         result['term_count'] = len(terms)
 
         deck = mw.col.decks.get(mw.col.decks.id(name))
-        model = addCustomModel(name, mw.col)
-
-        if config["rich_text_formatting"] and ".bgY" not in model["css"]:
-            model["css"] += rich_text_css
+        model = addCustomModel(name, mw.col, self.config)
 
         # assign custom model to new deck
         mw.col.decks.select(deck["id"])
         mw.col.decks.save(deck)
 
         # assign new deck to custom model
-        mw.col.models.setCurrent(model)
+        mw.col.models.set_current(model)
         model["did"] = deck["id"]
         mw.col.models.save(model)
 
         def getText(d, text=''):
-            if d is None:
+            if not d:
                 return text
             if d['type'] == 'text':
                 text = d['text']
@@ -464,7 +532,16 @@ class QuizletWindow(QWidget):
                             text = '<{0}>{1}</{0}>'.format(m['type'], text)
                         if 'attrs' in m:
                             attrs = " ".join(['{}="{}"'.format(k, v) for k, v in m['attrs'].items()])
-                            text = '<span {}>{}</span>'.format(attrs, text)
+                            if "class" in m['attrs']:
+                                light_color = rich_text_css_light_background_colors.get(m['attrs']['class'], '')
+                                dark_color = rich_text_css_dark_background_colors.get(m['attrs']['class'], '')
+                            else:
+                                light_color = ''
+                                dark_color = ''
+                            if light_color:
+                                text = '<span {} style="background-color: light-dark({}, {});">{}</span>'.format(attrs, light_color, dark_color, text)
+                            else:
+                                text = '<span {}>{}</span>'.format(attrs, text)
                 return text
             text = ''.join([getText(c) if c else '<br>' for c in d.get('content', [''])])
             if d['type'] == 'paragraph':
@@ -476,11 +553,13 @@ class QuizletWindow(QWidget):
             text = re.sub(r'\*(.+?)\*', r'<b>\1</b>', text)
             return text
 
-        for term in terms:
+        for idx, term in enumerate(terms, 1):
+            if self.closed:
+                break
             note = mw.col.newNote()
             note["Front"] = ankify(term['word'])
             note["Back"] = ankify(term['definition'])
-            if config["rich_text_formatting"]:
+            if self.config["rich_text_formatting"]:
                 note["Front"] = getText(term['wordRichText'], note["Front"])
                 note["Back"] = getText(term['definitionRichText'], note["Back"])
             if "photo" in term and term["photo"]:
@@ -493,38 +572,52 @@ class QuizletWindow(QWidget):
                 img_type = img_tkns[0]
                 term["_imageUrl"] = photo_urls[img_type].format(*img_tkns)
             if '_imageUrl' in term and term["_imageUrl"]:
-                # file_name = self.fileDownloader(term["image"]["url"])
                 file_name = self.fileDownloader(term["_imageUrl"])
-                if note["Back"]:
-                    note["Back"] += "<div><br></div>"
-                note["Back"] += '<div><img src="{0}"></div>'.format(file_name)
+                if file_name:
+                    note["Image"] = '<img src="{}">'.format(file_name)
                 mw.app.processEvents()
-            if config["rich_text_formatting"]:
-                note["Front"] = '<link rel="stylesheet" href="_quizlet.css">' + note["Front"]
+            if self.config["add_audio"]:
+                if term["wordTTS"]:
+                    file_name = self.fileDownloader(term["wordTTS"])
+                    if file_name:
+                        note["Front Audio"] = '[sound:{}]'.format(file_name)
+                if term["definitionTTS"]:
+                    file_name = self.fileDownloader(term["definitionTTS"])
+                    if file_name:
+                        note["Back Audio"] = '[sound:{}]'.format(file_name)
+            if self.config["add_reverse"]:
+                note["Add Reverse"] = "y"
             mw.col.addNote(note)
-        mw.col.reset()
+            self.label_results.setText(("Importing deck {} [{}/{}] ...".format(name, idx, len(terms))))
+            QApplication.instance().processEvents()
+        # mw.col.reset()
         mw.reset()
 
     # download the images
     def fileDownloader(self, url):
-        url = url.replace('_m', '')
-        file_name = "quizlet-" + url.split('/')[-1]
+        if '/tts/' in url:
+            m = re.search(r'tts/(\w+)\.mp3\?.*&s=([^&]+)', url)
+            file_name = "quizlet-" + m.group(1) + '-' + m.group(2) + ".mp3"
+        else:
+            url = url.replace('_m', '')
+            file_name = "quizlet-" + url.split('/')[-1]
         # get original, non-mobile version of images
-        r = requests.get(url, stream=True, verify=False, headers=headers)
+        r = curl_requests.get(url, impersonate="chrome")
         if r.status_code == 200:
-            with open(file_name, 'wb') as f:
-                r.raw.decode_content = True
-                shutil.copyfileobj(r.raw, f)
+            file_name = mw.col.media.write_data(file_name, r.content)
+        else:
+            file_name = ''
         return file_name
 
 class QuizletDownloader(QThread):
 
     # thread that downloads results from the Quizlet API
-    def __init__(self, window, url):
+    def __init__(self, window, url, cookies):
         super(QuizletDownloader, self).__init__()
         self.window = window
 
         self.url = url
+        self.cookies = cookies
         self.results = None
 
         self.error = False
@@ -536,46 +629,31 @@ class QuizletDownloader(QThread):
     def run(self):
         r = None
         try:
-            r = requests.get(self.url, verify=False, headers=headers, cookies=self.window.cookies)
+            r = curl_requests.get(self.url, cookies=self.cookies, impersonate="chrome")
             r.raise_for_status()
 
-            regex = re.escape('window.Quizlet["setPasswordData"]')
-
-            if re.search(regex, r.text):
-                self.error = True
-                self.errorCode = 403
-                return
-
-            regex = re.escape('window.Quizlet["setPageData"] = ')
+            regex = re.escape('<script id="__NEXT_DATA__" type="application/json">')
             regex += r'(.+?)'
-            regex += re.escape('; QLoad("Quizlet.setPageData");')
+            regex += re.escape('</script>')
             m = re.search(regex, r.text)
 
-            if not m:
-                regex = re.escape('window.Quizlet["assistantModeData"] = ')
-                regex += r'(.+?)'
-                regex += re.escape('; QLoad("Quizlet.assistantModeData");')
-                m = re.search(regex, r.text)
+            assert m, 'NO MATCH\n\n' + text
 
-            if not m:
-                regex = re.escape('window.Quizlet["cardsModeData"] = ')
-                regex += r'(.+?)'
-                regex += re.escape('; QLoad("Quizlet.cardsModeData");')
-                m = re.search(regex, r.text)
+            data = json.loads(m.group(1))["props"]["pageProps"]["dehydratedReduxStateKey"]
 
-            data = m.group(1).strip()
             self.results = json.loads(data)
 
             title = os.path.basename(self.url.strip()) or "Quizlet Flashcards"
-            m = re.search(r'<title>(.+?)</title>', r.text)
+            m = re.search(r'<title[^>]*>(.+?)</title>', r.text)
             if m:
                 title = m.group(1)
+                title = re.sub(r' Flashcards \| Quizlet$', '', title)
                 title = re.sub(r' \| Quizlet$', '', title)
                 title = re.sub(r'^Flashcards ', '', title)
                 title = re.sub(r'\s+', ' ', title)
                 title = title.strip()
             self.results['title'] = title
-        except requests.HTTPError as e:
+        except curl_requests.exceptions.HTTPError as e:
             self.error = True
             self.errorCode = e.response.status_code
             self.errorMessage = e.response.text

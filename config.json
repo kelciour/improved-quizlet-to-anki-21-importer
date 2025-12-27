@@ -1,5 +1,6 @@
 {
-	"qlts": "",
-	"cookies": "",
-	"rich_text_formatting": false
+    "add_audio": false,
+    "add_reverse": false,
+    "qlts": "",
+    "rich_text_formatting": true
 }
