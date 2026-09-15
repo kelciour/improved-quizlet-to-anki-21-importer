@@ -75,7 +75,7 @@
 
 __window = None
 
-import sys, math, time, urllib.parse, json, re, os
+import sys, math, html, time, urllib.parse, json, re, os
 
 # Anki
 from aqt import mw
@@ -88,7 +88,23 @@ import shutil
 
 requests.packages.urllib3.disable_warnings()
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
+addon_dir = os.path.dirname(os.path.realpath(__file__))
+vendor_dir = os.path.join(addon_dir, 'vendor')
+
+import platform
+
+if is_mac:
+    if 'arm' in platform.processor():
+        sys.path.append(os.path.join(vendor_dir, "macosx_11_0_arm64"))
+    else:
+        sys.path.append(os.path.join(vendor_dir, "macosx_10_9_x86_64"))
+elif is_win:
+    if 'arm' in platform.processor():
+        sys.path.append(os.path.join(vendor_dir, "win_arm64"))
+    else:
+        sys.path.append(os.path.join(vendor_dir, "win_amd64"))
+else:
+    sys.path.append(os.path.join(vendor_dir, "manylinux2014_x86_64.manylinux_2_17_x86_64"))
 
 from curl_cffi import requests as curl_requests
 
@@ -651,6 +667,7 @@ class QuizletDownloader(QThread):
                 title = re.sub(r' \| Quizlet$', '', title)
                 title = re.sub(r'^Flashcards ', '', title)
                 title = re.sub(r'\s+', ' ', title)
+                title = html.unescape(title)
                 title = title.strip()
             self.results['title'] = title
         except curl_requests.exceptions.HTTPError as e:
